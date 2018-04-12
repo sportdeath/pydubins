@@ -20,13 +20,34 @@
 cimport cython
 cimport core
 from libc.stdlib cimport malloc, free
+# from libc.math import round
 
+import numpy as np
+cimport numpy as np
 
 cdef inline int callback(double q[3], double t, void* f):
     '''Internal c-callback to convert values back to python
     '''
     qn = (q[0], q[1], q[2])
     return (<object>f)(qn, t)
+
+
+cdef struct map_data:
+    void * points
+    float origin_x
+    float origin_y
+    float resolution
+    int i
+
+cdef inline int map_callback(double q[3], double t, void* data_):
+    '''Internal c-callback to convert values back to python
+    '''
+    data = <map_data*> data_
+    (<object>data.points)[data.i,0] = round((q[0] - data.origin_x)/data.resolution)
+    (<object>data.points)[data.i,1] = round((q[1] - data.origin_y)/data.resolution)
+    data.i += 1
+
+    return 0
 
 LSL = 0
 LSR = 1
@@ -122,6 +143,24 @@ cdef class _DubinsPath:
             return 0
         core.dubins_path_sample_many(self.ppth, step_size, callback, <void*>f)
         return qs, ts
+
+    def sample_many_map(self, step_size, origin_x, origin_y, resolution):
+        '''Sample in a grid
+        '''
+        length = self.path_length()
+        num_samples = int(np.ceil(length/step_size))
+
+        cdef np.ndarray[np.int_t, ndim=2] points = np.empty((num_samples, 2), dtype=np.int)
+        cdef map_data data
+        data.points = <void *>points
+        data.origin_x = origin_x
+        data.origin_y = origin_y
+        data.resolution = resolution
+        data.i = 0
+
+        core.dubins_path_sample_many(self.ppth, step_size, map_callback, <void*>&data)
+
+        return points
 
     def extract_subpath(self, t):
         '''Extract a subpath
