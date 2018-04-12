@@ -33,20 +33,27 @@ cdef inline int callback(double q[3], double t, void* f):
 
 
 cdef struct map_data:
-    void * points
+    void * m # The map 
+    int height
+    int width
     float origin_x
     float origin_y
     float resolution
-    int i
+    int intersects
+    int occupancy_threshold
 
 cdef inline int map_callback(double q[3], double t, void* data_):
     '''Internal c-callback to convert values back to python
     '''
-    data = <map_data*> data_
-    (<object>data.points)[data.i,0] = round((q[0] - data.origin_x)/data.resolution)
-    (<object>data.points)[data.i,1] = round((q[1] - data.origin_y)/data.resolution)
-    data.i += 1
-
+    # print "shape = ", (<object>data.m).shape
+    # print "height = ", height
+    # print "width = ", width
+    cdef map_data * data = <map_data*> data_
+    cdef int x = round((q[0] - data.origin_x)/data.resolution)
+    cdef int y = round((q[1] - data.origin_y)/data.resolution)
+    if (x < 0) or (y < 0) or (x >= data.width) or (y >= data.height):
+        return 0
+    data.intersects = data.intersects or ((<object>data.m)[y,x] > data.occupancy_threshold)
     return 0
 
 LSL = 0
@@ -144,23 +151,29 @@ cdef class _DubinsPath:
         core.dubins_path_sample_many(self.ppth, step_size, callback, <void*>f)
         return qs, ts
 
-    def sample_many_map(self, step_size, origin_x, origin_y, resolution):
+    def sample_intersects(self, step_size, map_msg, occupancy_threshold):
         '''Sample in a grid
         '''
-        length = self.path_length()
-        num_samples = int(np.ceil(length/step_size))
 
-        cdef np.ndarray[np.int_t, ndim=2] points = np.empty((num_samples, 2), dtype=np.int)
+        cdef np.ndarray[np.int8_t, ndim=2] m = map_msg.data
         cdef map_data data
-        data.points = <void *>points
-        data.origin_x = origin_x
-        data.origin_y = origin_y
-        data.resolution = resolution
-        data.i = 0
+        data.m = <void *>m
+        data.origin_x = map_msg.info.origin.position.x
+        data.origin_y = map_msg.info.origin.position.y
+        data.height = map_msg.info.height
+        data.width = map_msg.info.width
+        data.resolution = map_msg.info.resolution
+        data.occupancy_threshold = occupancy_threshold
+        data.intersects = 0
 
         core.dubins_path_sample_many(self.ppth, step_size, map_callback, <void*>&data)
 
-        return points
+        # Check the endpoint
+        cdef double _q0[3]
+        core.dubins_path_endpoint(self.ppth, _q0)
+        map_callback(_q0, 1., <void*>&data)
+
+        return data.intersects
 
     def extract_subpath(self, t):
         '''Extract a subpath
