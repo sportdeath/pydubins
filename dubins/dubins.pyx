@@ -41,6 +41,7 @@ cdef struct map_data:
     float resolution
     int intersects
     int occupancy_threshold
+    int unknown_threshold
 
 cdef inline int map_callback(double q[3], double t, void* data_):
     '''Internal c-callback to convert values back to python
@@ -53,7 +54,8 @@ cdef inline int map_callback(double q[3], double t, void* data_):
     cdef int y = round((q[1] - data.origin_y)/data.resolution)
     if (x < 0) or (y < 0) or (x >= data.width) or (y >= data.height):
         return 0
-    data.intersects = data.intersects or ((<object>data.m)[y,x] > data.occupancy_threshold)
+    m = <object>data.m
+    data.intersects = data.intersects or (m[y,x] > data.occupancy_threshold) or (m[y,x] < data.unknown_threshold)
     return 0
 
 LSL = 0
@@ -151,7 +153,7 @@ cdef class _DubinsPath:
         core.dubins_path_sample_many(self.ppth, step_size, callback, <void*>f)
         return qs, ts
 
-    def sample_intersects(self, step_size, map_msg, occupancy_threshold):
+    def sample_intersects(self, step_size, map_msg, occupancy_threshold, unknown_threshold):
         '''Sample in a grid
         '''
 
@@ -164,6 +166,7 @@ cdef class _DubinsPath:
         data.width = map_msg.info.width
         data.resolution = map_msg.info.resolution
         data.occupancy_threshold = occupancy_threshold
+        data.unknown_threshold = unknown_threshold
         data.intersects = 0
 
         core.dubins_path_sample_many(self.ppth, step_size, map_callback, <void*>&data)
